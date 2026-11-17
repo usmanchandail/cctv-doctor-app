@@ -7,6 +7,8 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 const _navy = Color(0xFF000000);
+const _surface = Color(0xFF0A0A0A);
+const _lime = Color(0xFFB7F000);
 const _website = 'https://cctvdoctor.pk';
 
 void main() {
@@ -48,6 +50,7 @@ class _MainScreenState extends State<MainScreen> {
   late final WebViewController _controller;
   Timer? _splashTimer;
   int _progress = 0;
+  int _selectedTab = 0;
   bool _hasError = false;
   bool _showSplash = true;
 
@@ -75,7 +78,10 @@ class _MainScreenState extends State<MainScreen> {
             _hasError = false;
             _progress = 0;
           }),
-          onPageFinished: (_) {
+          onPageFinished: (_) async {
+            await _controller.runJavaScript(
+              "document.querySelectorAll('header, nav, .navbar, .site-header, footer, .site-footer').forEach(el => el.style.display = 'none');",
+            );
             setState(() => _progress = 100);
             _hideSplash();
           },
@@ -155,31 +161,87 @@ class _MainScreenState extends State<MainScreen> {
         }
       },
       child: Scaffold(
-        body: Stack(
-          children: [
-            _WebViewContent(
-              controller: _controller,
-              progress: _progress,
-              hasError: _hasError,
-              onRetry: _retry,
-            ),
-            IgnorePointer(
-              ignoring: !_showSplash,
-              child: AnimatedOpacity(
-                opacity: _showSplash ? 1 : 0,
-                duration: const Duration(milliseconds: 250),
-                child: ColoredBox(
-                  color: _navy,
-                  child: Center(
-                    child: Image.asset('assets/logo.png', width: 220),
+        body: SafeArea(
+          bottom: false,
+          child: Stack(
+            children: [
+              Column(
+                children: [
+                  const _AppHeader(),
+                  SizedBox(
+                    height: 3,
+                    child: LinearProgressIndicator(
+                      value: _progress / 100,
+                      color: _lime,
+                      backgroundColor: _surface,
+                    ),
+                  ),
+                  Expanded(
+                    child: _WebViewContent(
+                      controller: _controller,
+                      hasError: _hasError,
+                      onRetry: _retry,
+                    ),
+                  ),
+                ],
+              ),
+              IgnorePointer(
+                ignoring: !_showSplash,
+                child: AnimatedOpacity(
+                  opacity: _showSplash ? 1 : 0,
+                  duration: const Duration(milliseconds: 250),
+                  child: ColoredBox(
+                    color: _navy,
+                    child: Center(
+                      child: Image.asset('assets/square_icon.png', width: 140),
+                    ),
                   ),
                 ),
               ),
-            ),
+            ],
+          ),
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _selectedTab,
+          onTap: _navigateToTab,
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: _surface,
+          selectedItemColor: _lime,
+          unselectedItemColor: Colors.white60,
+          items: const [
+            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
+            BottomNavigationBarItem(icon: Icon(Icons.videocam_rounded), label: 'Services'),
+            BottomNavigationBarItem(icon: Icon(Icons.assignment_rounded), label: 'Get Quote'),
+            BottomNavigationBarItem(icon: Icon(Icons.support_agent_rounded), label: 'Contact'),
           ],
         ),
+        floatingActionButton: FloatingActionButton(
+          backgroundColor: const Color(0xFF25D366),
+          foregroundColor: Colors.white,
+          onPressed: _openWhatsApp,
+          child: const Icon(Icons.chat_rounded),
+        ),
+        floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       ),
     );
+  }
+
+  Future<void> _navigateToTab(int index) async {
+    setState(() => _selectedTab = index);
+    if (index == 0) {
+      await _controller.loadRequest(Uri.parse(_website));
+      return;
+    }
+
+    const anchors = ['#services', '#quote', '#contact'];
+    await _controller.runJavaScript("window.location.hash = '${anchors[index - 1]}';");
+  }
+
+  Future<void> _openWhatsApp() async {
+    final uri = Uri.parse(
+      'https://wa.me/?text=${Uri.encodeComponent('Hello CCTV Doctor')}',
+    );
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   @override
@@ -192,36 +254,39 @@ class _MainScreenState extends State<MainScreen> {
 class _WebViewContent extends StatelessWidget {
   const _WebViewContent({
     required this.controller,
-    required this.progress,
     required this.hasError,
     required this.onRetry,
   });
 
   final WebViewController controller;
-  final int progress;
   final bool hasError;
   final Future<void> Function() onRetry;
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Column(
-        children: [
-          if (progress < 100)
-            SizedBox(
-              height: 3,
-              child: LinearProgressIndicator(value: progress / 100),
+      top: false,
+      bottom: false,
+      child: hasError
+          ? _ErrorView(onRetry: onRetry)
+          : RefreshIndicator(
+              onRefresh: controller.reload,
+              child: WebViewWidget(controller: controller),
             ),
-          Expanded(
-            child: hasError
-                ? _ErrorView(onRetry: onRetry)
-                : RefreshIndicator(
-                    onRefresh: controller.reload,
-                    child: WebViewWidget(controller: controller),
-                  ),
-          ),
-        ],
-      ),
+    );
+  }
+}
+
+class _AppHeader extends StatelessWidget {
+  const _AppHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 52,
+      color: _surface,
+      alignment: Alignment.center,
+      child: Image.asset('assets/square_icon.png', height: 32),
     );
   }
 }

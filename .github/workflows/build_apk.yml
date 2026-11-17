@@ -22,22 +22,6 @@ jobs:
         with:
           flutter-version: "3.24.5"
           channel: stable
-      - name: Create app icon
-        run: |
-          python3 -m pip install --quiet Pillow
-          python3 - <<'PY'
-          from PIL import Image
-
-          logo = Image.open('assets/logo.png').convert('RGBA')
-          target_width = int(512 * 0.75)
-          target_height = round(logo.height * target_width / logo.width)
-          logo = logo.resize((target_width, target_height), Image.Resampling.LANCZOS)
-
-          canvas = Image.new('RGBA', (512, 512), '#000000')
-          position = ((512 - logo.width) // 2, (512 - logo.height) // 2)
-          canvas.alpha_composite(logo, position)
-          canvas.save('assets/app_icon.png')
-          PY
       - name: Create Android project
         run: >
           flutter create --org com.cctvdoctor --project-name cctv_doctor
