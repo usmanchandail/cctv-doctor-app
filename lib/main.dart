@@ -1,13 +1,21 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
-const _navy = Color(0xFF0A192F);
+const _navy = Color(0xFF000000);
 const _website = 'https://cctvdoctor.pk';
 
 void main() {
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Color(0xFF000000),
+      statusBarIconBrightness: Brightness.light,
+    ),
+  );
   runApp(const CctvDoctorApp());
 }
 
@@ -24,71 +32,41 @@ class CctvDoctorApp extends StatelessWidget {
         scaffoldBackgroundColor: _navy,
         useMaterial3: true,
       ),
-      home: const SplashScreen(),
+      home: const MainScreen(),
     );
   }
 }
 
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+class MainScreen extends StatefulWidget {
+  const MainScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  State<MainScreen> createState() => _MainScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
-  @override
-  void initState() {
-    super.initState();
-    Timer(const Duration(seconds: 2), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(builder: (_) => const WebViewHome()),
-        );
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset('assets/logo.png', width: 140, height: 140),
-            const SizedBox(height: 24),
-            const Text(
-              'CCTV DOCTOR',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, letterSpacing: 1.5),
-            ),
-            const SizedBox(height: 8),
-            const Text('We Care For Your Security'),
-            const SizedBox(height: 28),
-            const CircularProgressIndicator(),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class WebViewHome extends StatefulWidget {
-  const WebViewHome({super.key});
-
-  @override
-  State<WebViewHome> createState() => _WebViewHomeState();
-}
-
-class _WebViewHomeState extends State<WebViewHome> {
+class _MainScreenState extends State<MainScreen> {
   late final WebViewController _controller;
+  Timer? _splashTimer;
   int _progress = 0;
   bool _hasError = false;
+  bool _showSplash = true;
 
   @override
   void initState() {
     super.initState();
-    _controller = WebViewController()
+
+    late final PlatformWebViewControllerCreationParams params;
+    if (WebViewPlatform.instance is AndroidWebViewPlatform) {
+      params = AndroidWebViewControllerCreationParams
+          .fromPlatformWebViewControllerCreationParams(
+        const PlatformWebViewControllerCreationParams(),
+      );
+    } else {
+      params = const PlatformWebViewControllerCreationParams();
+    }
+
+    _controller = WebViewController.fromPlatformCreationParams(params)
+      ..setBackgroundColor(const Color(0xFF000000))
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -97,7 +75,10 @@ class _WebViewHomeState extends State<WebViewHome> {
             _hasError = false;
             _progress = 0;
           }),
-          onPageFinished: (_) => setState(() => _progress = 100),
+          onPageFinished: (_) {
+            setState(() => _progress = 100);
+            _hideSplash();
+          },
           onWebResourceError: (error) {
             if (error.isForMainFrame ?? true) {
               setState(() => _hasError = true);
@@ -114,6 +95,16 @@ class _WebViewHomeState extends State<WebViewHome> {
         ),
       )
       ..loadRequest(Uri.parse(_website));
+
+    _splashTimer = Timer(const Duration(milliseconds: 1200), _hideSplash);
+  }
+
+  void _hideSplash() {
+    if (mounted && _showSplash) {
+      _splashTimer?.cancel();
+      _splashTimer = null;
+      setState(() => _showSplash = false);
+    }
   }
 
   bool _isExternalLink(Uri uri) {
@@ -160,26 +151,76 @@ class _WebViewHomeState extends State<WebViewHome> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
         if (!didPop && await _handleBack() && context.mounted) {
-          Navigator.of(context).pop();
+          SystemNavigator.pop();
         }
       },
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('CCTV Doctor'),
-          backgroundColor: _navy,
-          bottom: _progress < 100
-              ? PreferredSize(
-                  preferredSize: const Size.fromHeight(3),
-                  child: LinearProgressIndicator(value: _progress / 100),
-                )
-              : null,
-        ),
-        body: _hasError
-            ? _ErrorView(onRetry: _retry)
-            : RefreshIndicator(
-                onRefresh: _controller.reload,
-                child: WebViewWidget(controller: _controller),
+        body: Stack(
+          children: [
+            _WebViewContent(
+              controller: _controller,
+              progress: _progress,
+              hasError: _hasError,
+              onRetry: _retry,
+            ),
+            IgnorePointer(
+              ignoring: !_showSplash,
+              child: AnimatedOpacity(
+                opacity: _showSplash ? 1 : 0,
+                duration: const Duration(milliseconds: 250),
+                child: ColoredBox(
+                  color: _navy,
+                  child: Center(
+                    child: Image.asset('assets/logo.png', width: 220),
+                  ),
+                ),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _splashTimer?.cancel();
+    super.dispose();
+  }
+}
+
+class _WebViewContent extends StatelessWidget {
+  const _WebViewContent({
+    required this.controller,
+    required this.progress,
+    required this.hasError,
+    required this.onRetry,
+  });
+
+  final WebViewController controller;
+  final int progress;
+  final bool hasError;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        children: [
+          if (progress < 100)
+            SizedBox(
+              height: 3,
+              child: LinearProgressIndicator(value: progress / 100),
+            ),
+          Expanded(
+            child: hasError
+                ? _ErrorView(onRetry: onRetry)
+                : RefreshIndicator(
+                    onRefresh: controller.reload,
+                    child: WebViewWidget(controller: controller),
+                  ),
+          ),
+        ],
       ),
     );
   }
