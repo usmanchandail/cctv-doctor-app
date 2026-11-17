@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -219,7 +220,7 @@ class _MainScreenState extends State<MainScreen> {
           backgroundColor: const Color(0xFF25D366),
           foregroundColor: Colors.white,
           onPressed: _openWhatsApp,
-          child: const Icon(Icons.chat_rounded),
+          child: const FaIcon(FontAwesomeIcons.whatsapp, size: 30, color: Colors.white),
         ),
         floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       ),
@@ -228,13 +229,8 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _navigateToTab(int index) async {
     setState(() => _selectedTab = index);
-    if (index == 0) {
-      await _controller.loadRequest(Uri.parse(_website));
-      return;
-    }
-
-    const anchors = ['#services', '#quote', '#contact'];
-    await _controller.runJavaScript("window.location.hash = '${anchors[index - 1]}';");
+    const paths = ['', '#services', '#contact', '#contact'];
+    await _controller.loadRequest(Uri.parse('$_website/${paths[index]}'));
   }
 
   Future<void> _openWhatsApp() async {
@@ -286,7 +282,7 @@ class _AppHeader extends StatelessWidget {
       height: 52,
       color: _surface,
       alignment: Alignment.center,
-      child: Image.asset('assets/square_icon.png', height: 32),
+      child: Image.asset('assets/logo.png', height: 35),
     );
   }
 }
