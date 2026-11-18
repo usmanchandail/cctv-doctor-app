@@ -229,14 +229,17 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _navigateToTab(int index) async {
     setState(() => _selectedTab = index);
-    const paths = ['', '#services', '#contact', '#contact'];
-    await _controller.loadRequest(Uri.parse('$_website/${paths[index]}'));
+    final List<String> urls = [
+      'https://cctvdoctor.pk/',
+      'https://cctvdoctor.pk/#services',
+      'https://cctvdoctor.pk/#quote',
+      'https://cctvdoctor.pk/#contact'
+    ];
+    await _controller.loadRequest(Uri.parse(urls[index]));
   }
 
   Future<void> _openWhatsApp() async {
-    final uri = Uri.parse(
-      'https://wa.me/?text=${Uri.encodeComponent('Hello CCTV Doctor')}',
-    );
+    final uri = Uri.parse('https://wa.me/923304455250');
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 

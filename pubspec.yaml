@@ -28,4 +28,3 @@ flutter:
 flutter_launcher_icons:
   android: true
   image_path: "assets/square_icon.png"
-  adaptive_icon_background: "#000000"
