@@ -24,7 +24,19 @@ const _webPageChromeCleanupScript = r'''
     '.site-footer',
     '.navbar',
     '.elementor-location-header',
-    '.elementor-location-footer'
+    '.elementor-location-footer',
+    '[class*="mobile-menu" i]',
+    '[id*="mobile-menu" i]',
+    '[class*="menu-drawer" i]',
+    '[id*="menu-drawer" i]',
+    '[class*="menu-overlay" i]',
+    '[id*="menu-overlay" i]',
+    '[class*="drawer-overlay" i]',
+    '[id*="drawer-overlay" i]',
+    '[class*="offcanvas" i]',
+    '[id*="offcanvas" i]',
+    '.elementor-menu-toggle',
+    '.elementor-nav-menu--dropdown'
   ];
   const popupSelectors = [
     '[role="dialog"]',
@@ -45,6 +57,22 @@ const _webPageChromeCleanupScript = r'''
     '[class*="ad-banner"]',
     '[id*="ad-banner"]'
   ];
+  const chromeStyle = document.createElement('style');
+  chromeStyle.id = 'cctv-doctor-web-chrome-cleanup';
+  chromeStyle.textContent = [
+    ...chromeSelectors,
+    ...popupSelectors,
+    'a[href*="wa.me"]',
+    'a[href*="whatsapp"]',
+    '[class*="floating" i]',
+    '[id*="floating" i]',
+    '[class*="sticky-widget" i]',
+    '[id*="sticky-widget" i]'
+  ].join(',') +
+      '{display:none!important;visibility:hidden!important;pointer-events:none!important}';
+  if (!document.getElementById(chromeStyle.id)) {
+    (document.head || document.documentElement).appendChild(chromeStyle);
+  }
   const popupPattern =
     /cookie|consent|newsletter|popup|modal|advert|promo-banner|ad-banner/i;
   const fixedPopupPattern =
@@ -185,6 +213,7 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   late final WebViewController _controller;
   Timer? _splashTimer;
+  String? _pendingTabTarget;
   int _progress = 0;
   int _selectedTab = 0;
   bool _hasError = false;
@@ -216,6 +245,11 @@ class _MainScreenState extends State<MainScreen> {
           }),
           onPageFinished: (_) async {
             await _controller.runJavaScript(_webPageChromeCleanupScript);
+            final pendingTarget = _pendingTabTarget;
+            if (pendingTarget != null) {
+              _pendingTabTarget = null;
+              await _scrollToTab(pendingTarget == 'home' ? null : pendingTarget);
+            }
             setState(() => _progress = 100);
             _hideSplash();
           },
@@ -335,19 +369,36 @@ class _MainScreenState extends State<MainScreen> {
             ],
           ),
         ),
-        bottomNavigationBar: BottomNavigationBar(
-          currentIndex: _selectedTab,
-          onTap: _navigateToTab,
-          type: BottomNavigationBarType.fixed,
-          backgroundColor: _surface,
-          selectedItemColor: _lime,
-          unselectedItemColor: Colors.white60,
-          items: const [
-            BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
-            BottomNavigationBarItem(icon: Icon(Icons.videocam_rounded), label: 'Services'),
-            BottomNavigationBarItem(icon: Icon(Icons.assignment_rounded), label: 'Get Quote'),
-            BottomNavigationBarItem(icon: Icon(Icons.support_agent_rounded), label: 'Contact'),
-          ],
+        bottomNavigationBar: NavigationBarTheme(
+          data: NavigationBarThemeData(
+            indicatorColor: const Color(0xFF050505),
+            iconTheme: WidgetStateProperty.resolveWith(
+              (states) => IconThemeData(
+                color: states.contains(WidgetState.selected) ? _lime : Colors.white60,
+              ),
+            ),
+            labelTextStyle: WidgetStateProperty.resolveWith(
+              (states) => TextStyle(
+                color: states.contains(WidgetState.selected) ? _lime : Colors.white60,
+                fontWeight: states.contains(WidgetState.selected)
+                    ? FontWeight.w600
+                    : FontWeight.normal,
+              ),
+            ),
+          ),
+          child: NavigationBar(
+            selectedIndex: _selectedTab,
+            onDestinationSelected: _navigateToTab,
+            backgroundColor: _surface,
+            indicatorColor: const Color(0xFF050505),
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+            destinations: const [
+              NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Home'),
+              NavigationDestination(icon: Icon(Icons.videocam_rounded), label: 'Services'),
+              NavigationDestination(icon: Icon(Icons.assignment_rounded), label: 'Get Quote'),
+              NavigationDestination(icon: Icon(Icons.support_agent_rounded), label: 'Contact'),
+            ],
+          ),
         ),
         floatingActionButton: FloatingActionButton(
           backgroundColor: const Color(0xFF25D366),
@@ -361,9 +412,9 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<void> _navigateToTab(int index) async {
-    setState(() => _selectedTab = index);
     const targets = <String?>[null, 'services', 'quote', 'contact'];
     if (index < 0 || index >= targets.length) return;
+    setState(() => _selectedTab = index);
 
     final target = targets[index];
     final currentUrl = await _controller.currentUrl();
@@ -375,42 +426,86 @@ class _MainScreenState extends State<MainScreen> {
 
     if (target == null) {
       if (isHomePage) {
-        await _controller.runJavaScript('''
-          if (window.location.hash) {
-            window.history.replaceState(null, '', window.location.pathname + window.location.search);
-          }
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        ''');
+        await _scrollToTab(null);
       } else {
+        _pendingTabTarget = 'home';
         await _controller.loadRequest(Uri.parse('$_website/'));
       }
       return;
     }
 
     if (!isHomePage) {
+      _pendingTabTarget = target;
       await _controller.loadRequest(Uri.parse('$_website/#$target'));
+      return;
+    }
+
+    await _scrollToTab(target);
+  }
+
+  Future<void> _scrollToTab(String? target) async {
+    if (target == null) {
+      await _controller.runJavaScript('''
+        if (window.location.hash) {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        }
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      ''');
       return;
     }
 
     await _controller.runJavaScript('''
       (() => {
         const key = '$target';
-        const normalized = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-        const direct = document.getElementById(key) ||
-          document.querySelector('[name="' + key + '"]');
-        const idMatch = direct || Array.from(document.querySelectorAll('[id]'))
-          .find((element) => normalized(element.id).includes(key));
-        const keywords = {
-          services: /service/i,
-          quote: /quote|estimate/i,
-          contact: /contact|get in touch|reach us/i
+        const aliases = {
+          services: ['service'],
+          quote: ['quote', 'estimate'],
+          contact: ['contact', 'get in touch', 'reach us']
         };
-        const heading = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
-          .find((element) => keywords[key].test(element.innerText || ''));
-        const section = heading && heading.closest('section, article, [id]');
-        const target = idMatch || section || heading;
-        if (target) {
-          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        const normalize = (value) =>
+          (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const matches = (value) =>
+          aliases[key].some((alias) => normalize(value).includes(alias));
+        const isUsable = (element) =>
+          !element.closest('[data-cctv-doctor-hidden="true"]') &&
+          getComputedStyle(element).display !== 'none' &&
+          getComputedStyle(element).visibility !== 'hidden';
+        const elements = Array.from(document.querySelectorAll(
+          'section, article, [id], [name], [data-section]'
+        )).filter(isUsable);
+        const exact = elements.find((element) =>
+          normalize(element.id) === key ||
+          normalize(element.getAttribute('name')) === key
+        );
+        const identified = exact || elements.find((element) =>
+          matches(element.id) ||
+          matches(element.getAttribute('name')) ||
+          matches(element.getAttribute('data-section'))
+        );
+        const linked = Array.from(document.querySelectorAll('a[href]'))
+          .filter(isUsable)
+          .find((link) => {
+            try {
+              const url = new URL(link.href, window.location.href);
+              return url.origin === window.location.origin &&
+                url.hash && matches(decodeURIComponent(url.hash.slice(1)));
+            } catch (_) {
+              return false;
+            }
+          });
+        const linkedElement = linked &&
+          document.getElementById(decodeURIComponent(new URL(linked.href).hash.slice(1)));
+        const linkedTarget = linkedElement && isUsable(linkedElement)
+          ? linkedElement
+          : linked;
+        const heading = Array.from(document.querySelectorAll(
+          'h1, h2, h3, h4, h5, h6'
+        )).filter(isUsable).find((element) => matches(element.innerText));
+        const section = heading &&
+          heading.closest('section, article, [id], .elementor-section');
+        const destination = identified || linkedTarget || section || heading;
+        if (destination) {
+          destination.scrollIntoView({ behavior: 'smooth', block: 'start' });
           window.history.replaceState(null, '', '#' + key);
         } else {
           window.location.hash = key;
