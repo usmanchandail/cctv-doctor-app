@@ -11,6 +11,141 @@ const _navy = Color(0xFF000000);
 const _surface = Color(0xFF0A0A0A);
 const _lime = Color(0xFFB7F000);
 const _website = 'https://cctvdoctor.pk';
+const _webPageChromeCleanupScript = r'''
+(() => {
+  const chromeSelectors = [
+    'header',
+    'nav',
+    'footer',
+    '[role="banner"]',
+    '[role="navigation"]',
+    '[role="contentinfo"]',
+    '.site-header',
+    '.site-footer',
+    '.navbar',
+    '.elementor-location-header',
+    '.elementor-location-footer'
+  ];
+  const popupSelectors = [
+    '[role="dialog"]',
+    '[aria-modal="true"]',
+    '.elementor-popup-modal',
+    '[class*="cookie"]',
+    '[id*="cookie"]',
+    '[class*="consent"]',
+    '[id*="consent"]',
+    '[class*="newsletter"]',
+    '[id*="newsletter"]',
+    '[class*="popup"]',
+    '[id*="popup"]',
+    '[class*="modal"]',
+    '[id*="modal"]',
+    '[class*="promo-banner"]',
+    '[id*="promo-banner"]',
+    '[class*="ad-banner"]',
+    '[id*="ad-banner"]'
+  ];
+  const popupPattern =
+    /cookie|consent|newsletter|popup|modal|advert|promo-banner|ad-banner/i;
+  const fixedPopupPattern =
+    /cookie|consent|newsletter|popup|modal|advert|promo|banner|announcement|subscribe|offer/i;
+  const floatingPattern =
+    /floating|sticky|whatsapp|messenger|chat|tawk|crisp|intercom|quote[-_ ]?cta|contact[-_ ]?cta|call[-_ ]?cta/i;
+  const actionPattern =
+    /get\s*(?:a\s*)?quote|request\s*(?:a\s*)?quote|\bquote\b|\bcontact\b|call\s*(?:now|us)|\bphone\b|chat\s*(?:now|with us)?|whats?app|message\s*us|free\s*consultation/i;
+
+  function hide(element) {
+    if (!(element instanceof Element) || element === document.body ||
+        element === document.documentElement) return;
+    if (element.style.getPropertyValue('display') === 'none' &&
+        element.style.getPropertyPriority('display') === 'important') return;
+    element.style.setProperty('display', 'none', 'important');
+    element.setAttribute('data-cctv-doctor-hidden', 'true');
+  }
+
+  function clean(root) {
+    if (!root || !root.querySelectorAll) return;
+    const matches = (selector) => {
+      if (root instanceof Element && root.matches(selector)) hide(root);
+      root.querySelectorAll(selector).forEach(hide);
+    };
+    chromeSelectors.forEach(matches);
+    popupSelectors.forEach(matches);
+
+    const candidates = [];
+    if (root instanceof Element) candidates.push(root);
+    candidates.push(...root.querySelectorAll(
+      'a, button, iframe, [class], [id], [role], [aria-label], [title]'
+    ));
+    for (const element of candidates) {
+      if (!(element instanceof Element)) continue;
+      const classes = typeof element.className === 'string'
+        ? element.className
+        : '';
+      const widgetIdentity = [
+        element.id,
+        classes,
+        element.getAttribute('aria-label') || '',
+        element.getAttribute('title') || ''
+      ].join(' ');
+      const identity = [
+        widgetIdentity,
+        element.getAttribute('href') || '',
+        (element.innerText || '').slice(0, 180)
+      ].join(' ');
+      if (popupPattern.test(widgetIdentity) ||
+          element.matches('[role="dialog"], [aria-modal="true"]')) {
+        hide(element);
+        continue;
+      }
+
+      const position = getComputedStyle(element).position;
+      const isFixed = position === 'fixed' || position === 'sticky';
+      const isButton = element.matches('a, button, iframe, [role="button"]');
+      if (floatingPattern.test(widgetIdentity) ||
+          (isFixed &&
+              (fixedPopupPattern.test(identity) ||
+                  (isButton && actionPattern.test(identity))))) {
+        hide(element);
+      }
+    }
+  }
+
+  function cleanWithoutJump(root) {
+    const pointY = Math.min(120, Math.max(0, window.innerHeight - 1));
+    const anchor = document.elementFromPoint(window.innerWidth / 2, pointY);
+    const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
+    clean(root);
+    if (anchor && anchor.isConnected &&
+        !anchor.closest('[data-cctv-doctor-hidden="true"]')) {
+      const shift = anchor.getBoundingClientRect().top - anchorTop;
+      if (Math.abs(shift) > 1) window.scrollBy(0, shift);
+    }
+  }
+
+  cleanWithoutJump(document);
+  window.setTimeout(() => cleanWithoutJump(document), 350);
+  window.setTimeout(() => cleanWithoutJump(document), 1100);
+
+  if (!window.__cctvDoctorCleanupObserver && document.documentElement) {
+    window.__cctvDoctorCleanupObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        if (record.type === 'childList') {
+          record.addedNodes.forEach((node) => cleanWithoutJump(node));
+        } else {
+          cleanWithoutJump(record.target);
+        }
+      }
+    });
+    window.__cctvDoctorCleanupObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'id', 'role', 'aria-modal', 'style']
+    });
+  }
+})();
+''';
 
 void main() {
   SystemChrome.setSystemUIOverlayStyle(
@@ -80,9 +215,7 @@ class _MainScreenState extends State<MainScreen> {
             _progress = 0;
           }),
           onPageFinished: (_) async {
-            await _controller.runJavaScript(
-              "document.querySelectorAll('header, nav, .navbar, .site-header, footer, .site-footer').forEach(el => el.style.display = 'none');",
-            );
+            await _controller.runJavaScript(_webPageChromeCleanupScript);
             setState(() => _progress = 100);
             _hideSplash();
           },
@@ -229,13 +362,61 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _navigateToTab(int index) async {
     setState(() => _selectedTab = index);
-    final List<String> urls = [
-      'https://cctvdoctor.pk/',
-      'https://cctvdoctor.pk/#services',
-      'https://cctvdoctor.pk/#quote',
-      'https://cctvdoctor.pk/#contact'
-    ];
-    await _controller.loadRequest(Uri.parse(urls[index]));
+    const targets = <String?>[null, 'services', 'quote', 'contact'];
+    if (index < 0 || index >= targets.length) return;
+
+    final target = targets[index];
+    final currentUrl = await _controller.currentUrl();
+    final currentUri = currentUrl == null ? null : Uri.tryParse(currentUrl);
+    final isHomePage = currentUri != null &&
+        (currentUri.host == 'cctvdoctor.pk' ||
+            currentUri.host == 'www.cctvdoctor.pk') &&
+        (currentUri.path.isEmpty || currentUri.path == '/');
+
+    if (target == null) {
+      if (isHomePage) {
+        await _controller.runJavaScript('''
+          if (window.location.hash) {
+            window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          }
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        ''');
+      } else {
+        await _controller.loadRequest(Uri.parse('$_website/'));
+      }
+      return;
+    }
+
+    if (!isHomePage) {
+      await _controller.loadRequest(Uri.parse('$_website/#$target'));
+      return;
+    }
+
+    await _controller.runJavaScript('''
+      (() => {
+        const key = '$target';
+        const normalized = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const direct = document.getElementById(key) ||
+          document.querySelector('[name="' + key + '"]');
+        const idMatch = direct || Array.from(document.querySelectorAll('[id]'))
+          .find((element) => normalized(element.id).includes(key));
+        const keywords = {
+          services: /service/i,
+          quote: /quote|estimate/i,
+          contact: /contact|get in touch|reach us/i
+        };
+        const heading = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'))
+          .find((element) => keywords[key].test(element.innerText || ''));
+        const section = heading && heading.closest('section, article, [id]');
+        const target = idMatch || section || heading;
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          window.history.replaceState(null, '', '#' + key);
+        } else {
+          window.location.hash = key;
+        }
+      })();
+    ''');
   }
 
   Future<void> _openWhatsApp() async {
