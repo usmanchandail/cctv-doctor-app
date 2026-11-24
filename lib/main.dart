@@ -57,18 +57,38 @@ const _webPageChromeCleanupScript = r'''
     '[class*="ad-banner"]',
     '[id*="ad-banner"]'
   ];
-  const chromeStyle = document.createElement('style');
-  chromeStyle.id = 'cctv-doctor-web-chrome-cleanup';
-  chromeStyle.textContent = [
-    ...chromeSelectors,
-    ...popupSelectors,
+  const topBarSelectors = [
+    'header',
+    'nav',
+    '[role="banner"]',
+    '[role="navigation"]',
+    '[class*="header" i]',
+    '[id*="header" i]',
+    '[class*="navbar" i]',
+    '[id*="navbar" i]',
+    '[class*="navigation" i]',
+    '[id*="navigation" i]',
+    '[class*="menu" i]',
+    '[id*="menu" i]',
+    '[class*="nav" i]',
+    '[id*="nav" i]',
+    '[class*="topbar" i]',
+    '[id*="topbar" i]'
+  ].join(',');
+  const cleanupSelectors = [...chromeSelectors, ...popupSelectors].join(',');
+  const staticCleanupSelectors = [
+    cleanupSelectors,
     'a[href*="wa.me"]',
     'a[href*="whatsapp"]',
     '[class*="floating" i]',
     '[id*="floating" i]',
     '[class*="sticky-widget" i]',
     '[id*="sticky-widget" i]'
-  ].join(',') +
+  ].join(',');
+  const chromeStyle = document.createElement('style');
+  chromeStyle.id = 'cctv-doctor-web-chrome-cleanup';
+  chromeStyle.textContent =
+      staticCleanupSelectors +
       '{display:none!important;visibility:hidden!important;pointer-events:none!important}';
   if (!document.getElementById(chromeStyle.id)) {
     (document.head || document.documentElement).appendChild(chromeStyle);
@@ -79,6 +99,7 @@ const _webPageChromeCleanupScript = r'''
     /cookie|consent|newsletter|popup|modal|advert|promo|banner|announcement|subscribe|offer/i;
   const floatingPattern =
     /floating|sticky|whatsapp|messenger|chat|tawk|crisp|intercom|quote[-_ ]?cta|contact[-_ ]?cta|call[-_ ]?cta/i;
+  const topBarPattern = /header|nav|menu|top[-_ ]?bar|masthead/i;
   const actionPattern =
     /get\s*(?:a\s*)?quote|request\s*(?:a\s*)?quote|\bquote\b|\bcontact\b|call\s*(?:now|us)|\bphone\b|chat\s*(?:now|with us)?|whats?app|message\s*us|free\s*consultation/i;
 
@@ -93,12 +114,8 @@ const _webPageChromeCleanupScript = r'''
 
   function clean(root) {
     if (!root || !root.querySelectorAll) return;
-    const matches = (selector) => {
-      if (root instanceof Element && root.matches(selector)) hide(root);
-      root.querySelectorAll(selector).forEach(hide);
-    };
-    chromeSelectors.forEach(matches);
-    popupSelectors.forEach(matches);
+    if (root instanceof Element && root.matches(cleanupSelectors)) hide(root);
+    root.querySelectorAll(cleanupSelectors).forEach(hide);
 
     const candidates = [];
     if (root instanceof Element) candidates.push(root);
@@ -118,8 +135,7 @@ const _webPageChromeCleanupScript = r'''
       ].join(' ');
       const identity = [
         widgetIdentity,
-        element.getAttribute('href') || '',
-        (element.innerText || '').slice(0, 180)
+        element.getAttribute('href') || ''
       ].join(' ');
       if (popupPattern.test(widgetIdentity) ||
           element.matches('[role="dialog"], [aria-modal="true"]')) {
@@ -127,23 +143,65 @@ const _webPageChromeCleanupScript = r'''
         continue;
       }
 
-      const position = getComputedStyle(element).position;
-      const isFixed = position === 'fixed' || position === 'sticky';
+      if (floatingPattern.test(widgetIdentity)) {
+        hide(element);
+        continue;
+      }
+
       const isButton = element.matches('a, button, iframe, [role="button"]');
-      if (floatingPattern.test(widgetIdentity) ||
-          (isFixed &&
-              (fixedPopupPattern.test(identity) ||
-                  (isButton && actionPattern.test(identity))))) {
+      const buttonIdentity = isButton
+        ? `${identity} ${(element.textContent || '').slice(0, 180)}`
+        : identity;
+      const mayBeFixedPopup = fixedPopupPattern.test(buttonIdentity) ||
+          (isButton && actionPattern.test(buttonIdentity));
+      if (mayBeFixedPopup) {
+        const position = getComputedStyle(element).position;
+        if (position === 'fixed' || position === 'sticky') hide(element);
+      }
+    }
+
+    const topBars = [];
+    if (root instanceof Element && root.matches(topBarSelectors)) {
+      topBars.push(root);
+    }
+    topBars.push(...root.querySelectorAll(topBarSelectors));
+    for (const element of topBars) {
+      if (element === document.body ||
+          element === document.documentElement ||
+          element.hasAttribute('data-cctv-doctor-hidden')) {
+        continue;
+      }
+      const identity = [
+        element.tagName,
+        element.id,
+        typeof element.className === 'string' ? element.className : '',
+        element.getAttribute('role') || '',
+        element.getAttribute('aria-label') || ''
+      ].join(' ');
+      if (!topBarPattern.test(identity)) continue;
+
+      const rect = element.getBoundingClientRect();
+      if (rect.top >= -12 &&
+          rect.top <= 12 &&
+          rect.width >= window.innerWidth * 0.9 &&
+          rect.height > 0 &&
+          rect.height < 140) {
+        const position = getComputedStyle(element).position;
+        if (position !== 'fixed' && position !== 'sticky') continue;
+        if (element.matches('main, [role="main"]') ||
+            element.querySelector('main, [role="main"]')) {
+          continue;
+        }
         hide(element);
       }
     }
   }
 
-  function cleanWithoutJump(root) {
+  function cleanRootsWithoutJump(roots) {
     const pointY = Math.min(120, Math.max(0, window.innerHeight - 1));
     const anchor = document.elementFromPoint(window.innerWidth / 2, pointY);
     const anchorTop = anchor ? anchor.getBoundingClientRect().top : 0;
-    clean(root);
+    roots.forEach(clean);
     if (anchor && anchor.isConnected &&
         !anchor.closest('[data-cctv-doctor-hidden="true"]')) {
       const shift = anchor.getBoundingClientRect().top - anchorTop;
@@ -151,17 +209,35 @@ const _webPageChromeCleanupScript = r'''
     }
   }
 
+  const cleanWithoutJump = (root) => cleanRootsWithoutJump([root]);
   cleanWithoutJump(document);
-  window.setTimeout(() => cleanWithoutJump(document), 350);
-  window.setTimeout(() => cleanWithoutJump(document), 1100);
 
   if (!window.__cctvDoctorCleanupObserver && document.documentElement) {
+    const pendingRoots = new Set();
+    let cleanupTimer = null;
+    const scheduleCleanup = (root) => {
+      if (!root || !root.querySelectorAll || pendingRoots.has(document)) return;
+      if (pendingRoots.size >= 12) {
+        pendingRoots.clear();
+        pendingRoots.add(document);
+      } else {
+        pendingRoots.add(root);
+      }
+      if (cleanupTimer !== null) return;
+      cleanupTimer = window.setTimeout(() => {
+        cleanupTimer = null;
+        const roots = Array.from(pendingRoots);
+        pendingRoots.clear();
+        cleanRootsWithoutJump(roots);
+      }, 80);
+    };
     window.__cctvDoctorCleanupObserver = new MutationObserver((records) => {
       for (const record of records) {
         if (record.type === 'childList') {
-          record.addedNodes.forEach((node) => cleanWithoutJump(node));
-        } else {
-          cleanWithoutJump(record.target);
+          record.addedNodes.forEach(scheduleCleanup);
+        } else if (record.attributeName !== 'style' ||
+            !record.target.hasAttribute('data-cctv-doctor-hidden')) {
+          scheduleCleanup(record.target);
         }
       }
     });
@@ -238,20 +314,20 @@ class _MainScreenState extends State<MainScreen> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onProgress: (progress) => setState(() => _progress = progress),
+          onProgress: (progress) {
+            setState(() => _progress = progress);
+            if (progress > 0) _hideSplash();
+          },
           onPageStarted: (_) => setState(() {
             _hasError = false;
             _progress = 0;
           }),
-          onPageFinished: (_) async {
-            await _controller.runJavaScript(_webPageChromeCleanupScript);
-            final pendingTarget = _pendingTabTarget;
-            if (pendingTarget != null) {
-              _pendingTabTarget = null;
-              await _scrollToTab(pendingTarget == 'home' ? null : pendingTarget);
-            }
-            setState(() => _progress = 100);
+          onPageFinished: (_) {
             _hideSplash();
+            setState(() => _progress = 100);
+            final pendingTarget = _pendingTabTarget;
+            _pendingTabTarget = null;
+            unawaited(_runPageFinishedTasks(pendingTarget));
           },
           onWebResourceError: (error) {
             if (error.isForMainFrame ?? true) {
@@ -278,6 +354,13 @@ class _MainScreenState extends State<MainScreen> {
       _splashTimer?.cancel();
       _splashTimer = null;
       setState(() => _showSplash = false);
+    }
+  }
+
+  Future<void> _runPageFinishedTasks(String? pendingTarget) async {
+    await _controller.runJavaScript(_webPageChromeCleanupScript);
+    if (pendingTarget != null) {
+      await _scrollToTab(pendingTarget == 'home' ? null : pendingTarget);
     }
   }
 
@@ -458,52 +541,90 @@ class _MainScreenState extends State<MainScreen> {
       (() => {
         const key = '$target';
         const aliases = {
-          services: ['service'],
+          services: ['service', 'services'],
           quote: ['quote', 'estimate'],
           contact: ['contact', 'get in touch', 'reach us']
         };
         const normalize = (value) =>
           (value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-        const matches = (value) =>
-          aliases[key].some((alias) => normalize(value).includes(alias));
+        const rank = (value) => {
+          const normalized = normalize(value);
+          if (!normalized) return 0;
+          if (aliases[key].includes(normalized)) return 100;
+          const alias = aliases[key].find((item) => normalized.includes(item));
+          if (!alias) return 0;
+          return 50 + alias.length;
+        };
         const isUsable = (element) =>
-          !element.closest('[data-cctv-doctor-hidden="true"]') &&
-          getComputedStyle(element).display !== 'none' &&
-          getComputedStyle(element).visibility !== 'hidden';
-        const elements = Array.from(document.querySelectorAll(
-          'section, article, [id], [name], [data-section]'
-        )).filter(isUsable);
-        const exact = elements.find((element) =>
-          normalize(element.id) === key ||
-          normalize(element.getAttribute('name')) === key
+          !element.closest('[data-cctv-doctor-hidden], [hidden], [aria-hidden="true"]');
+        const matches = (selector) =>
+          Array.from(document.querySelectorAll(selector)).filter(isUsable);
+        const candidates = new Map();
+        const addCandidate = (element, score) => {
+          if (!element || score <= 0 || !isUsable(element)) return;
+          const current = candidates.get(element) || 0;
+          if (score > current) candidates.set(element, score);
+        };
+
+        const identified = matches(
+          '[id], [name], [data-section], [data-section-id], [data-anchor], ' +
+          '[data-target], [data-page], [data-nav], [data-menu], [data-id], [data-name]'
         );
-        const identified = exact || elements.find((element) =>
-          matches(element.id) ||
-          matches(element.getAttribute('name')) ||
-          matches(element.getAttribute('data-section'))
-        );
-        const linked = Array.from(document.querySelectorAll('a[href]'))
-          .filter(isUsable)
-          .find((link) => {
-            try {
-              const url = new URL(link.href, window.location.href);
-              return url.origin === window.location.origin &&
-                url.hash && matches(decodeURIComponent(url.hash.slice(1)));
-            } catch (_) {
-              return false;
+        for (const element of identified) {
+          const idScore = rank(element.id);
+          const nameScore = rank(element.getAttribute('name'));
+          if (idScore) addCandidate(element, 300 + idScore);
+          if (nameScore) addCandidate(element, 290 + nameScore);
+          for (const attribute of element.attributes) {
+            if (attribute.name.startsWith('data-')) {
+              const dataScore = rank(attribute.value);
+              if (dataScore) addCandidate(element, 250 + dataScore);
             }
-          });
-        const linkedElement = linked &&
-          document.getElementById(decodeURIComponent(new URL(linked.href).hash.slice(1)));
-        const linkedTarget = linkedElement && isUsable(linkedElement)
-          ? linkedElement
-          : linked;
-        const heading = Array.from(document.querySelectorAll(
-          'h1, h2, h3, h4, h5, h6'
-        )).filter(isUsable).find((element) => matches(element.innerText));
-        const section = heading &&
-          heading.closest('section, article, [id], .elementor-section');
-        const destination = identified || linkedTarget || section || heading;
+          }
+        }
+
+        for (const heading of matches('h1, h2, h3, h4, h5, h6')) {
+          const headingScore = rank(heading.textContent);
+          if (!headingScore) continue;
+          const section = heading.closest(
+            'section, article, [id], [data-section], .elementor-section'
+          );
+          addCandidate(section || heading, 200 + headingScore);
+        }
+
+        for (const control of matches('a[href], button, [role="button"]')) {
+          const label = [
+            control.textContent || '',
+            control.getAttribute('aria-label') || '',
+            control.getAttribute('title') || '',
+            control.getAttribute('href') || ''
+          ].join(' ');
+          const labelScore = rank(label);
+          if (labelScore) addCandidate(control, 150 + labelScore);
+
+          if (!control.matches('a[href]')) continue;
+          try {
+            const url = new URL(control.href, window.location.href);
+            if (url.origin !== window.location.origin || !url.hash) continue;
+            const hashScore = rank(decodeURIComponent(url.hash.slice(1)));
+            if (!hashScore) continue;
+            const target = document.getElementById(
+              decodeURIComponent(url.hash.slice(1))
+            );
+            addCandidate(target || control, 280 + hashScore);
+          } catch (_) {
+            continue;
+          }
+        }
+
+        let destination = null;
+        let bestScore = 0;
+        for (const [element, score] of candidates) {
+          if (score > bestScore) {
+            destination = element;
+            bestScore = score;
+          }
+        }
         if (destination) {
           destination.scrollIntoView({ behavior: 'smooth', block: 'start' });
           window.history.replaceState(null, '', '#' + key);
